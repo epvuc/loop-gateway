@@ -1,0 +1,33 @@
+#! /bin/sh
+# epv 8/24/2016
+# start a background screen session and run a command in it. 
+# if there already is one, just add a new window to it with the 
+# specified command. 
+# Optionally use -t to specify a single-word name for the window 
+# within the session. 
+
+if [ "$1" = "-t" ]; then
+        shift;
+        if [ "$#" -lt 1 ]; then
+                echo "Error: -t needs an argument"
+                exit
+        fi
+        TITLE=$1
+        shift;
+else
+        TITLE="untitled"
+fi
+if [ "$#" -lt 1 ]; then
+        echo "Usage: start-in-screen.sh [-t <title>] commandline..."
+        exit 1
+fi
+
+SYSSTY=`screen -ls | grep autosession | awk '{ print $1 }'`
+if [ -z $SYSSTY ]; then
+        echo no sys screen session found, creating one.
+        screen -t $TITLE -d -m -S autosession bash -c "$*"
+        SYSSTY=`screen -ls | grep autosession | awk '{ print $1 }'`
+else
+	export STY=$SYSSTY
+	screen -t $TITLE bash -c "$*"
+fi
