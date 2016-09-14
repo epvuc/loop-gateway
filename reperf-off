@@ -1,0 +1,6 @@
+#! /bin/sh
+
+# Convenience script to run 'br' using the "bottlerocket" X10 RF transmitter to 
+# control device power. 
+
+br -x /dev/ttyUSB0 O2 off

@@ -1,0 +1,241 @@
+#! /usr/bin/perl
+use FileHandle;
+use IO::Socket;
+use IO::Handle;
+use IO::Select;
+use Net::ICB qw(:client);
+use Switch;
+#use Text::Levenshtein qw(distance);
+# let's try this instead.
+use String::LCSS_XS qw(lcss lcss_all);
+
+
+# This is probably not useful to anyone but me, but it's a client for
+# the archaic ICB online chat protocol. It logs you in to ICB and connects
+# to the tty loop via tcp to the ser.py process and relays messages
+# between.  There are a bunch of perl module dependencies you get to
+# resolve, but iirc they're all in CPAN. 
+# Invoke it using the wrapper "ttyicb.sh" from a command defined in ser.py, 
+# then send it commands prefixed with "/":
+# /q, /quit
+# /m username  -  send private message
+# /w  -  get connected user list
+# /g channelname -  join a different channel
+# /b  -  send beep to user
+# There are some others, see the end of this file. 
+
+# It will connect to ser.py via TCP. 
+my $host = "127.0.0.1";
+my $port = 11123;
+
+# $ignoring_tty = 1;
+$ignoring_tty = 0;
+
+# open the socket to the teletype machine via heavymetal.pl
+$tty_socket = IO::Socket::INET->new(PeerAddr => $host,
+                                PeerPort => $port,
+                                Proto    => "tcp",
+                                Type     => SOCK_STREAM)
+    or die "Couldn't connect to $remote_host:$remote_port : $@\n";
+$tty_socket->flush(); 
+
+#print $tty_socket "\$LOGIN ICB HEEPY\r\n";
+#print $tty_socket "\$HMPIPE\r\n";
+#sleep(1);
+
+$tty_socket->blocking(0); # need one char at a time from socket
+$icb_obj = new Net::ICB('user' => "MY_ICB_USERNAME");
+($type,@msg) = $icb_obj->readmsg();
+exit unless ($type eq $M_PROTO);
+($type, @msg) = $icb_obj->readmsg();
+exit unless ($type eq $M_LOGINOK);
+$icb_obj->sendcmd("g", "my_private_channel");
+($type, @msg) = $icb_obj->readmsg();
+
+# lock the teletype machine so other output won't interrupt it. 
+system("/opt/ttycommands/ttylock.sh");
+
+$sel = IO::Select->new();
+$sel->add($tty_socket);
+$sel->add($icb_obj->fd());
+# $|=1;
+send_to_tty("connected.\r\n");
+while(1) { 
+	@ready = $sel->can_read();
+	foreach $fh (@ready) {
+
+		# something came in from ICB,
+		# and we're not busy typing a line, thus ignoring icb
+		if (($fh == $icb_obj->fd()) && ($typing == 0)) { # icb socket is readable
+			($type, @msg) = $icb_obj->readmsg();
+			my ($from, $text) = @msg;
+			switch ($type) { 
+				case "b"	{ 
+						  print"icb sent \($from\) $text\n"; 
+						  send_to_tty("\($from\) $text");
+						}
+				case "c"	{ 
+						  print "icb sent -$from- $text\n"; 
+						  send_to_tty("-$from- $text"); 
+						}
+				else 		{ 
+						  print "type=[$type], from=[$from], text=$text\n"; 
+						  if ($type eq $M_ERROR) { 
+							send_to_tty("err");
+						  }
+						  if ($type eq $M_BEEP) { 
+							send_to_tty("beep from $from \007\007");
+						  }
+						  if ( ($type eq $M_CMDOUT) && ($expecting_output)){ 
+						    	send_to_tty($text);
+						  }
+						}
+			}
+		}
+
+		# something came in from the teletype
+		if($fh == $tty_socket) { 
+			$line = <$tty_socket>; 
+			$sender = $1 if $line =~ /^(.*?): /;
+			$line =~ s/^TTY1: //;
+			$line =~ s/^TCP: //;
+			$line =~ s/\n//g; $line =~ s/\r//g;
+			print "\r\nfrom_tty: $line EOL\r\n";
+			$line = "" if $line =~ /^\(/;
+
+			# if it came from something other than the teletype, ignore
+                        # we need to do echo suppression since we see every line we send to
+                        # the teletype come back to us as if just typed.
+                        if (is_echo($line)) {
+                            print "suppressing echo.\n"
+                        } else {
+                            # now we have a legitimate line actually typed on the TTY
+                            if ($line ne "") {
+                               	    process_tty_line($line);
+                            }
+                        }
+		}
+		$line="";
+	}
+} 
+
+
+# return the ratio of longest common substring to length of the longest of the two strings.
+# as a guess at whether they are the same string subject to some corruption at the beginning
+# due to typing on the tty just when it's starting to print. 
+sub lcssmatch { 
+	my ($string1, $string2) = @_;
+	my $lcss = lcss ( $string1, $string2 );
+	my $lcss_len = length($lcss);
+	if ((length($string1) == 0) || (length($string2) == 0) || ($lcss_len == 0)) {
+        	$overlap = 0;
+	} elsif (length($string1) >= length($string2)) {
+        	$overlap = 100 * ($lcss_len / length($string1));
+	} elsif (length($string1) < length($string2)) {
+        	$overlap = 100 * ($lcss_len / length($string2));
+	}
+	return $overlap;
+}
+
+sub is_echo { 
+	my ($line) = @_;
+	return 0 if ($line eq "");
+	return 0 if ($line =~ /^\/q /i); # don't let echo suppressor prevent us from quitting.
+
+	my $found = 0;
+	for(my $i=0; $i <= $#echosuppress; $i++) { 
+		$line =~ s/\n//g; $line =~ s/\r//g;
+		$compare = $echosuppress[$i];
+		$compare =~ s/\n//g; $compare =~ s/\r//g; 
+		$overlap = lcssmatch(lc($line), lc($compare));
+		printf("   is_echo comparing [%s] against [%s] = %.1f%%\n", lc($line), lc($compare), $overlap);
+		# fuzzy match using edit distance instead of strictly, since we get corruption
+		if ($overlap >= 70.0)  { 
+			$found = 1;
+			print "Found\n";
+			delete $echosuppress[$i]; 
+		}
+	}
+	# just a safety in case echo suppression fails - 
+	# don't repeat something that looks like icb output
+	if (($line =~ /^\(/)  || ($line =~ /^\-/) ) {
+		$found=1;
+	}
+	return($found);
+}
+
+sub send_to_tty {
+    my ($l) = @_;
+    $l =~ s/\@/\(at\)/;
+    $l =~ s/~/\(tilde\)/;
+    $l =~ s/%/\(pct\)/;
+    if (length $l <= 70) {
+	push (@echosuppress, $l);
+	print $tty_socket "$l\n";
+    } else {
+        $subline = substr($l, 0, 70);
+        $l = substr($l, 70);
+	push (@echosuppress, $subline);
+        print $tty_socket "$subline\n";
+        send_to_tty($l);
+    }
+}
+
+sub process_tty_line { 
+	my ($l) = @_;
+	print "process_tty_line got $l\n";
+	# turn off the flag that makes it print informational messages
+	# from the server, used currently just for /w. Otherwise the tty
+	# gets spammed with server info at login, etc. 
+	$expecting_output = 0;
+
+	# if this is not a / command, it's an open message
+	if (!($l =~ /^\//)) { 
+		$icb_obj->sendopen($line);
+	} else {
+		if ($l =~ /^\/b /i) { 
+			($cmd, $recip, $crap) = split(" ", $l, 3);
+			print "send beep to $recip\n";
+		        $icb_obj->sendcmd("beep", $recip);
+		}
+		if ($l =~ /^\/m /i) { 
+			($cmd, $recip, $text) = split(" ", $l, 3);
+			print "send /m to $recip containing $text\n";
+			$icb_obj->sendpriv($recip, $text);
+		}
+		if ($l =~ /^\/g /i) { 
+			($cmd, $group, $crap) = split(" ", $l);
+			print "change to group $group\n";
+			$icb_obj->sendcmd("g", $group);
+			($type,@msg) = $icb_obj->readmsg();
+			if ($type eq $M_ERROR) { 
+				send_to_tty("failed to join group.\n");
+			} else {
+				send_to_tty("now in $group\n");
+			}
+		}
+		if ($l =~ /^\/w/i) { 
+			$expecting_output = 1;
+			$icb_obj->sendcmd("w", "-s", ".");
+		}
+		if ($l =~ /^\/nick /i) { 
+			($cmd, $newname, $crap) = split(" ", $l, 3);
+			print "change name to $newname\n";
+		        $icb_obj->sendcmd("name", $newname);
+		}
+		if ($l =~ /^\/pass /i) { 
+			($cmd, $newname, $crap) = split(" ", $l, 3);
+			print "pass mod to $newname\n";
+		        $icb_obj->sendcmd("pass", $newname);
+		}
+		if ($l =~ /^\/q/i) { 
+			print "exit\n";
+			send_to_tty("quitting icb");
+			# remove the lockfile so other things can talk to tty
+			system("/opt/ttycommands/ttyunlock.sh"); 
+			sleep(2);
+			exit;
+		}
+	}
+}
+

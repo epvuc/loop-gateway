@@ -1,0 +1,127 @@
+TTY loop gateway software
+eric volpe, epvgk@limpoc.com, Sept. 2016
+
+This was written basically as a bare-bones alternative to HeavyMetal, with the goal
+of using external modules to add functionality rather than having everything inside 
+one program, and of being easy to extend and maintain as APIs change, etc. Further,
+it is meant to be compact and light on resource usage so it can run on even small,
+slow linux computers like Raspberry Pi Zero. 
+
+There are surely plenty of bugs and omissions. It's been briefly cleaned up and
+commented in response to a request to share it. 
+
+All components are in the directory /opt/ttycommands. 
+
+The master program is "ser.py", the program that talks directly to the teletype loop.  
+Using a usb-teletype adapter in 5-bit passthru mode, this is usually /dev/ttyACM0, 
+Look for the comment "Open the tty loop serial interface." It assumes it will be 
+doing the character set conversion, not the adapter. It should work with anything
+that passes the lower 5 bits of characters at the correct speed but i've only 
+tested it with my adapters (http://heepy.net/index.php/USB-teletype)
+
+INPUT/OUTPUT PROCESSING:
+
+First, it processes tty loop input and output. 
+
+  1. Duplex: each character sent to the loop also comes back from the loop; ser.py
+       ignores the return chars and does not consider them as input. 
+
+  2. Garble detection: if a character transmitted to the loop is not echoed intact,
+       output is stopped since this means something else on the loop is typing too.
+
+  3. Break detection: If a break (>500mS) is received from the loop, all current
+       printing is stopped and it returns to waiting for tty loop user input. This
+       depends on the USB-teletype adapter. 
+
+  4. Input special characters: (see MACROS) - ASCII characters that don't exist in 
+       ITA-2 can be entered using macros, for instance "$AT" --> "@"
+
+  5. Lines exceeding maximum tty line length (wrap_output =) are wrapped to the next 
+      line.
+
+  6. While the tty loop user is typing a line of text, any other output is suppressed
+      until the end of the line to avoid interrupting. If the tty remains mid-line
+      without activity for more than 60 seconds, output suppression is cancelled.
+
+  
+COMMAND PROCESSING
+
+It accepts commands from the teletype loop and does things based on them. 
+The commands are defined in ser.py, look for "COMMAND DEFINITIONS"
+You can have a tty-typed command run basically any linux command/script. 
+The definition governs how it will be run and given its input/output. 
+
+ '$sms2': { 'cmd': '/opt/ttycommands/send_sms_flowroute.py', 'stdin': True, 'args': '1', 'prompt': 'Message:\r\n'},
+
+"$sms2"  -  is the command typed from the tty. 
+
+'cmd': '/path/to/your/command'  -  the program on the rpi to execute when the command is typed
+
+'stdin': True/False  -  (default False)
+      if False, the program is run immediately and its output sent to the tty loop
+      if True, it waits for more lines of text to be typed on the tty loop followed by NNNN
+         Once finished, the program is then run and the block of text is fed to it as input, 
+         and its output is sent to the tty loop. 
+
+'args': False, or a number in single quotes  (default False)
+      if False, the program is invoked with no arguments and arguments following $COMMAND are ignored.
+      if a number, that number of space-delimited arguments will be accepted from the tty command line
+         and appended to the linux command when executed. 
+      if True, any number of commands will be accepted. 
+
+'prompt': 'prompt text' -
+      if included in the definition, for a command with 'stdin': True, the prompt text will
+         be printed to the tty loop as a prompt before waiting for lines of text input. 
+
+'shell': True/False  -  (default False)
+       if True, the whole command as typed from the tty loop is lowercased and fed to the 
+         linux bash shell as a single commandline. This is dangerous because it inherently
+         allows arbitrary commands to be run on the rpi and arbitrary files read/modified. 
+
+When accepting input from the tty loop, the string "$ABORT" anywhere on a line aborts the
+input in progress and returns to waiting for text. 
+
+Pressing the BREAK key at any time stops the current output and returns to waiting for text. 
+
+TCP CLIENTS
+
+Secondly, ser.py listens for incoming tcp connections on port 11123. 
+
+Connected clients can send ascii text, which will be lightly cleaned up and line-wrapped
+and sent to the tty loop; text typed from the tty loop will be sent to all connected
+clients.  The exception to this is that commands (lines starting with $), and lines 
+being collected as input to a command, are evaluated locally, and not sent to clients.
+This is useful for more complex clients which do realtime input/output connected to the
+tty loop. 
+
+MODULES - included modules, which can be used in command definitions.
+
+serve-cgi.sh, cgi-bin - programs to accept incoming web API calls from SMS providers
+email-to-tty.sh - forward email to this using procmail to have it printed on the tty
+grabfeed.sh - linux command run by $FEED to print an API top headlines summary
+grabweather.sh, weather - linux command run by $WX to print a weather forecast by zip code
+mime-extract.py - used by email-to-tty.sh to extract only text from incoming email
+slack.sh, new-slack.py - Slack.com client for teletype
+new-telepipe.py - linux command to submit text to tty loop for printing
+new-telestream.py - Streaming twitter search client
+process-incoming.sh - print queue processor
+reddit.py - basic Reddit client for teletype
+reperf-on, reperf-off, tty-on, tty-off - use X10 home control hw to power machines on and off
+send_email.py - linux command run by $EMAIL to send email from teletype
+send_sms_flowroute.py - linux command run by $SMS to send an SMS using Flowroute service
+send_sms_twilio.py - linux command run by $SMS2 to send an SMS using Twilio service
+ser.py - the master program
+startup.sh - linux command to start all the other components 
+status.sh - linux script run by $STATUS to print system status to teletype
+ttyicb, ttyicb.sh - ICB chat network client
+ttylock.sh, ttyunlock.sh - lock/unlock unsolicited text output to loop
+tweets.py - linux program run by $TWEETS to display twitter updates
+unisqlite.py - linux program to update Emoji description database
+wpress.py - linux program run by $WPRESS to post WordPress blog updates
+
+DEPENDENCIES
+
+The various modules are mostly in python and introduce various module dependencies. 
+At some point I need to enumerate them carefully but for now, at least the following:
+email getpass HTMLParser logging praw serial signal sleekxmpp smtplib sqlite3 
+textwrap tweepy unicodedata wordpresslib
