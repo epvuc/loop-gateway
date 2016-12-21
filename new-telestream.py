@@ -144,7 +144,7 @@ class Teletype:
         fmtblock = '\n'.join(textwrap.wrap(block, width=66, 
                              initial_indent='', subsequent_indent=' '*indent))
 
-        # hand it off to the heavymetal process
+        # hand it off to the gateway process
 
         # if the last time we sent a message to the tty was long enough ago
         # that we have probably finished printing everything in the backlog,
@@ -196,5 +196,6 @@ if __name__ == '__main__':
     else: 
 	# stream our own twitter timeline
         tty.ttysock.sendall('streaming timeline.\n\n')
-        stream.userstream(myscreenname)
-
+        #stream.userstream(myscreenname)
+        #stream.userstream(_with='followings')
+        stream.userstream(encoding='utf8')

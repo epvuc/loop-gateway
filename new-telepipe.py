@@ -123,12 +123,12 @@ if __name__ == '__main__':
     if args.power:
         # Turn on the machine.
         if args.which == 'reperf':
-            on_cmd = ['/usr/bin/br', '-x', '/dev/ttyUSB0', 'O2', 'on']
-            off_cmd = ['/usr/bin/br', '-x', '/dev/ttyUSB0', 'O2', 'off']
+            on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O2', 'on']
+            off_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O2', 'off']
             startdelay = 7
         else:
-            on_cmd = ['/usr/bin/br', '-x', '/dev/ttyUSB0', 'O1', 'on']
-            off_cmd = ['/usr/bin/br', '-x', '/dev/ttyUSB0', 'O1', 'off']
+            on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'on']
+            off_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'off']
             startdelay = 2
         try:
             p = subprocess.Popen(on_cmd)
