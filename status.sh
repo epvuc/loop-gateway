@@ -1,8 +1,4 @@
 #! /bin/sh
-# This lets you get a summary of system status by typing "$STATUS" on a
-# teletype, and getting output to the teletype, when defined as a command
-# in ser.py. 
-
 echo -n "uptime: "
 uptime | perl -lne 'print $1 if /up (.*?),/;'
 # ip addr 10.0.0.148  metric 202  (10.0.0.0/24, eth0)
@@ -13,9 +9,11 @@ echo -n "screens: "
 screen -ls | grep autosession | awk '{ print $1 }' | cut -d. -f2 | fmt
 echo -n "ser.py pid: "
 pgrep -f "python /opt/ttycommands/ser.py" || echo MISSING
+echo -n "rf cmd rcvr: "
+pgrep -f mochad-command-runner || echo MISSING
 echo -n "ttybot pid: "
 pgrep ttybot.py || echo MISSING
 echo -n "twitter stream: "
-pgrep telestream.py > /dev/null || echo "Not running." && ps axw | perl -lne 'print $1 if /python \/opt\/ttycommands\/(telestream.py .*)/;'
+pgrep -f new-telestream.py > /dev/null || echo "Not running." && ps axw | perl -lne 'print $1 if /python .*\/(new-telestream.py .*)/;'
 echo -n "xmpp client: "
 pgrep xtty.py > /dev/null || echo "Not running." && ps axw | perl -lne 'print $1 if /python \/opt\/ttycommands\/(xtty.py .*)/;'
