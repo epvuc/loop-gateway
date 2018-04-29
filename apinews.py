@@ -5,6 +5,7 @@
 # Also, you'll need to sign up for a free individual account at
 # newsapi.org and get an API key, which you should then enter here
 # replacing the text "MY_API_KEY"
+# eric volpe 4/29/2018
 
 from newsapi import NewsApiClient
 from datetime import date, datetime, timedelta
@@ -24,10 +25,12 @@ fromdate = yesterday.strftime('%Y-%m-%d')
 top_headlines = newsapi.get_top_headlines(country='us', category='general')
 
 print "AP NEWS", today.strftime('%Y-%m-%d')
+# the list of articles they return sometimes has duplicates, so deduplicate
 a = []
 for art in top_headlines['articles']:
     if art not in a:
         a.append(art)
+# print the local date and title for each entry, formatted for teletype
 for art in a:
     # newsapi's timestamps are UTC strings, so parse them, convert to localtime, then re-format
     published = datetime.strptime(art['publishedAt'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=tzutc())
