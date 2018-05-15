@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 # Slack client for teletype, using slack RTM API
 # meant to work with ser.py for interfacing with teletypes.
-# You need the Slack python API module (pip install slackclient)
 # epv 4/20/2018
 
 import os, time, sys, select, socket, re
@@ -16,6 +15,7 @@ slack_token = "MY_SLACK_TOKEN"
 
 # your Slack "team" should include this channel.
 default_channel = 'MY_DEFAULT_CHANNEL'
+
 
 GRUBER_URLINTEXT_PAT =  re.compile(r'(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:\'".,<>?«»“”‘’]))')
 
@@ -45,22 +45,45 @@ def slack_userid_to_username(u):
 def slack_channelid_to_channelname(c):
     if c is None:
         return None
-    try:
-        channel_info = sc.api_call('channels.info', channel=c)
-        channel_name = channel_info['channel']['name']
-    except:
-        channel_name = None
+    if c.startswith('C'):
+        try:
+            channel_info = sc.api_call('channels.info', channel=c)
+            channel_name = channel_info['channel']['name']
+        except:
+            channel_name = None
+    else:
+        try:
+            group_info = sc.api_call('groups.info', channel=c)
+            channel_name = group_info['group']['name']
+        except:
+            channel_name = None
     return channel_name
 
 def slack_channelname_to_channelid(n):
     # should probably cache this instead of checking every time but enh.
+    print 'looking up channelid for', n
     chan = sc.api_call("channels.list")
     cmap = {}
     for c in chan['channels']:
         cmap[c['name']] = c['id']
         cmap[c['name'].lower()] = c['id']
-    return(cmap.get(n))
-
+    if cmap.get(n):
+        print 'returning channelid', cmap.get(n), 'for channel', n
+        return(cmap.get(n))
+    else:
+        print 'channel', n, 'not found in open channel list, trying groups'
+        groups = sc.api_call("groups.list")
+        cmap = {}
+        for c in groups['groups']:
+            cmap[c['name']] = c['id']
+            cmap[c['name'].lower()] = c['id']
+        if cmap.get(n):
+            print 'returning group id', cmap.get(n), 'for channel', n
+            return(cmap.get(n))
+        else:
+            print 'channel', n, 'not found in groups list either, returning null.'
+            return False
+    
 def slack_get_presence(u):
     p = sc.api_call('users.getPresence', user=u)
     if p.get('presence') == 'active':
@@ -88,6 +111,20 @@ def resolve_ids(m):
     except:
         pass
     return m
+
+def slack_join_channel_or_group(newchannel):
+    if newchannel.startswith('C'):
+        print 'joining channel', newchannel
+        res = sc.api_call('channels.join', channel=newchannel)
+    else:
+        print 'joining group', newchannel
+        res = sc.api_call('groups.open', channel=newchannel)
+    if res.get('ok') == True:
+        current_channel = newchannel
+        return True
+    else:
+        current_channel = False
+        return False
 
 def sl_print(m):
     # print(m)
@@ -195,9 +232,9 @@ def process_slack_event(r):
 
 
 
-# connect to the teletype via ser.py (change the connect() call as needed)
+# connect to the teletype via ser.py
 teletype = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-teletype.connect(('127.0.0.1', 11123))
+teletype.connect(('10.0.0.148', 11123))
 teletype.send("slack starting\r\n")
 
 online = True
@@ -224,18 +261,18 @@ if sc.rtm_connect(auto_reconnect = True):
     current_channel = ''
     if len(sys.argv) > 1:
         newchannel = slack_channelname_to_channelid(sys.argv[1])
-        res = sc.api_call('channels.join', channel=newchannel)
-        if res.get('ok') == True:
+        if slack_join_channel_or_group(newchannel):
             current_channel = newchannel
         else:
+            current_channel = ''
             sl_print("failed to join %s" % (sys.argv[1]))
 
     if current_channel == '':
         newchannel = slack_channelname_to_channelid(default_channel)
-        res = sc.api_call('channels.join', channel=newchannel)
-        if res.get('ok') == True:
+        if slack_join_channel_or_group(newchannel):
             current_channel = newchannel
         else:
+            current_channel = ''
             sl_print('failed to join default channel %s' %(default_channel))
             
     if current_channel == '':
@@ -297,8 +334,7 @@ if sc.rtm_connect(auto_reconnect = True):
                         if not newchannel:
                             sl_print('no such channel')
                             continue
-                        res = sc.api_call('channels.join', channel=newchannel)
-                        if res.get('ok') == True:
+                        if slack_join_channel_or_group(newchannel):
                             print "joined", cmd[1].lower(), "=", newchannel
                             current_channel = newchannel
                             sl_print("joined channel %s" %(cmd[1]))
