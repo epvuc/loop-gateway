@@ -1,27 +1,24 @@
-#! /usr/bin/python
-# -*- coding: utf-8 -*-
+#! /usr/bin/python # -*- coding: utf-8 -*-
 # Slack client for teletype, using slack RTM API
 # meant to work with ser.py for interfacing with teletypes.
 # epv 4/20/2018
+# fix attempting to find private channels, still kinda janky
 
 import os, time, sys, select, socket, re
 from slackclient import SlackClient
 from pprint import pprint
 import unicodedata
 
-# Slack login credential, obtained via:
-# https://get.slack.help/hc/en-us/articles/215770388-Create-and-regenerate-API-tokens
-slack_token = "MY_SLACK_TOKEN"
-
-# your Slack "team" should include this channel.
-default_channel = 'MY_DEFAULT_CHANNEL'
-
+# work
+slack_token = "xoxp-1234567890-1234567890-1234567890123-1234567890-MY-SLACK-TOKEN"
+default_channel = 'mydefaultchannel'
 
 GRUBER_URLINTEXT_PAT =  re.compile(r'(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:\'".,<>?«»“”‘’]))')
 
 # Character substitutions when printing to the teletype.
 edits = [ ('@', '(at)'), ('<', '('), ('>', ')'), ('%', '(pct)'), ('=', '(eq)'),
                     ('[', '('), (']', ')'), ('+', '.'), ('_', '-'), ('|', '!') ]
+
 def tty_send(msg):
     outbound = unicodedata.normalize('NFKD', unicode(msg)).encode('ascii', 'ignore')
     # outbound = str(msg.decode('ascii', 'ignore'))
@@ -62,9 +59,10 @@ def slack_channelid_to_channelname(c):
 def slack_channelname_to_channelid(n):
     # should probably cache this instead of checking every time but enh.
     print 'looking up channelid for', n
-    chan = sc.api_call("channels.list")
+    chan = sc.api_call("conversations.list", limit=1000, types=['private_channel', 'public_channel'])
     cmap = {}
     for c in chan['channels']:
+        print("channel: " + c['name'])
         cmap[c['name']] = c['id']
         cmap[c['name'].lower()] = c['id']
     if cmap.get(n):
@@ -75,6 +73,7 @@ def slack_channelname_to_channelid(n):
         groups = sc.api_call("groups.list")
         cmap = {}
         for c in groups['groups']:
+            print("group: " + c['name'])
             cmap[c['name']] = c['id']
             cmap[c['name'].lower()] = c['id']
         if cmap.get(n):
@@ -113,9 +112,11 @@ def resolve_ids(m):
     return m
 
 def slack_join_channel_or_group(newchannel):
+    print("slack_join_channel_or_group(%s) --->" % (newchannel))
     if newchannel.startswith('C'):
-        print 'joining channel', newchannel
-        res = sc.api_call('channels.join', channel=newchannel)
+        print ('joining channel %s -->' %( newchannel))
+        res = sc.api_call('conversations.join', channel=newchannel)
+        pprint(res)
     else:
         print 'joining group', newchannel
         res = sc.api_call('groups.open', channel=newchannel)
@@ -123,6 +124,7 @@ def slack_join_channel_or_group(newchannel):
         current_channel = newchannel
         return True
     else:
+        print("slack_join_channel_or_group(%s) returning False because sc.api_call() failed" % (newchannel))
         current_channel = False
         return False
 
@@ -232,9 +234,9 @@ def process_slack_event(r):
 
 
 
-# connect to the teletype via ser.py
+# connect to the teletype via ser.py. This can be on another host, doesn't matter. 
 teletype = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-teletype.connect(('10.0.0.148', 11123))
+teletype.connect(('127.0.0.1', 11123))
 teletype.send("slack starting\r\n")
 
 online = True
@@ -331,10 +333,13 @@ if sc.rtm_connect(auto_reconnect = True):
                     # is the last one you joined. 
                     if (cmd[0] == '/j' or cmd[0] == '/join') and len(cmd) > 1:
                         newchannel = slack_channelname_to_channelid(cmd[1].lower())
+			print("--> /j %s returns:" % (cmd[1].lower()))
+			pprint(newchannel)
                         if not newchannel:
                             sl_print('no such channel')
                             continue
-                        if slack_join_channel_or_group(newchannel):
+                        # if slack_join_channel_or_group(newchannel):
+                        if True:
                             print "joined", cmd[1].lower(), "=", newchannel
                             current_channel = newchannel
                             sl_print("joined channel %s" %(cmd[1]))
@@ -390,7 +395,7 @@ if sc.rtm_connect(auto_reconnect = True):
                     # /channels - list channels i'm subscribed to
                     if cmd[0] == '/channels':
                         try:
-                            my_channels = [i['name'] for i in sc.api_call('channels.list', exclude_members=True)['channels'] if i['is_member'] is True]
+                            my_channels = [i['name'] for i in sc.api_call('conversations.list', exclude_members=True)['channels'] if i['is_member'] is True]
                         except:
                             my_channels = ["can't get list of channels"]
                         sl_print("subscribed channels:\r\n%s" % (' '.join(my_channels)))

@@ -1,4 +1,5 @@
 #! /usr/bin/python
+
 # This uses http://newsapi.org 's API to get recent news headlines.
 # It will need the python dateutil module (pip install dateutil) 
 # and the newsapi.org python module (pip install newsapi-python)
@@ -24,13 +25,11 @@ fromdate = yesterday.strftime('%Y-%m-%d')
 
 top_headlines = newsapi.get_top_headlines(country='us', category='general')
 
-print "AP NEWS", today.strftime('%Y-%m-%d')
-# the list of articles they return sometimes has duplicates, so deduplicate
+print "ZCZC AP NEWS", today.strftime('%Y-%m-%d')
 a = []
 for art in top_headlines['articles']:
     if art not in a:
         a.append(art)
-# print the local date and title for each entry, formatted for teletype
 for art in a:
     # newsapi's timestamps are UTC strings, so parse them, convert to localtime, then re-format
     published = datetime.strptime(art['publishedAt'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=tzutc())
@@ -39,4 +38,5 @@ for art in a:
     block = unicodedata.normalize('NFKD', unicode(block)).encode('ascii', 'ignore')
     indent = 4
     fmtblock = '\n'.join(textwrap.wrap(block, width=66, initial_indent='', subsequent_indent=' '*indent))
-    print fmtblock
+    print fmtblock+'\n'
+print "NNNN"

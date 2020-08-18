@@ -6,6 +6,7 @@
 #
 import urllib
 import urllib2
+import ssl
 import BeautifulSoup
 import datetime
 import calendar
@@ -333,7 +334,10 @@ def getziplatlong(zip, verbose=False) :
     if verbose :
         print("NWS ZIP lookup url: %s" % (url,))          # show URL
     try:
-        opener = urllib2.urlopen(url)           # URL opener object 
+	ctx = ssl.create_default_context()
+	ctx.check_hostname = False
+	ctx.verify_mode = ssl.CERT_NONE
+        opener = urllib2.urlopen(url, context=ctx)           # URL opener object 
         xmltext = opener.read()                 # read entire contents
         opener.close()                          # close
         tree = BeautifulSoup.BeautifulStoneSoup(xmltext)

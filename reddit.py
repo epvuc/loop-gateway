@@ -7,15 +7,6 @@ import sys
 import unicodedata
 import re
 
-#
-# This program will connect to Reddit using the public API and fetch the
-# top few posts and responses from the requested subreddit, formatting them
-# for teletype and outputting them via stdout. It can be invoked by a command
-# definition in ser.py so that its output is printed to the loop. 
-# Note: it is slow, and produces a lot of output, so it will keep the machine
-# printing for a long time, usually. 
-#
-
 # halfassed attempt to match "any" url, since we don't want to print them
 # see http://daringfireball.net/2010/07/improved_regex_for_matching_urls
 GRUBER_URLINTEXT_PAT =  re.compile(r'(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:\'".,<>?«»“”‘’]))')
@@ -27,14 +18,10 @@ edits = [ ('@', '(at)'), ('<', '('), ('>', ')'), ('%', '(pct)'), ('=', '(eq)'),
 
 class TeleReddit():
         """reddit for teletype"""
-        def __init__(self, user_agent='redditype', login='', password=''):
-                self.r = praw.Reddit(user_agent=user_agent)
-                if login and password:
-                        try:
-                                r.login(self.login, self.password)
-                        except:
-                                sys.stderr.write('login failed for user '+self.login+'\n')
-                        print 'logged in'
+        def __init__(self):
+                self.r = praw.Reddit(user_agent='redditype', 
+				client_id='MY_CLIENT_ID', 
+				client_secret='MY_CLIENT_SECRET')
 
         def ttyprint(self, body=u'', width=65, indent=0):
                 """pretty print a block of text suitable for teletype output"""
@@ -53,9 +40,11 @@ class TeleReddit():
 
         def printcomments(self, sub, max=5): 
                 """pretty print the comments attached to a Submission object"""
-                fc = praw.helpers.flatten_tree(s.comments)
+                fc = sub.comments.list()
                 i = 1
                 for comm in fc:
+			if comm.author == "AutoModerator":
+				next
                         if hasattr(comm, "body"):
                                 tr.ttyprint( unicode(i) + u" : " + unicode(comm.author))
                                 tr.ttyprint (body=comm.body, width=60, indent=6)
@@ -76,8 +65,9 @@ if __name__ == "__main__":
 
         tr = TeleReddit()
 
-        newsubmissions = tr.r.get_subreddit(mysub).get_hot(limit=maxsubmissions)
-        for s in newsubmissions:
+	sub = tr.r.subreddit(mysub)
+
+        for s in sub.hot(limit=maxsubmissions):
 		if skipstickies and s.stickied:
 			continue
                 tr.ttyprint(u"Created by " + unicode(s.author) + u" " + \

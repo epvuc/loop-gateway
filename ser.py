@@ -1,7 +1,4 @@
 #! /usr/bin/env python
-# eric volpe 9/2016
-# See README.TXT for info. 
-
 import serial
 import sys
 import time
@@ -34,7 +31,7 @@ feed_sockets = 'lines'
 exec_timeout = 45
 midline_timeout_secs = 60
 control_power = False
-control_power_timeout = 60 # how long to leave motor running before idle timeout
+control_power_timeout = 30 # how long to leave motor running before idle timeout
 
 # macros for typing characters that don't exist in baudot
 # TODO: macros and commands should be read from a config file, not hardcoded here. 
@@ -45,24 +42,32 @@ input_subs = [
 ]
 
 # commands to be run on tty input
-cmds = { '$sms': { 'cmd': '/opt/ttycommands/send_sms_twilio.py', 'stdin': False, 'args': True } ,
-         '$smsr': { 'cmd': '/opt/ttycommands/send_sms_flowroute.py', 'stdin': True, 'args': '1' },
+cmds = { '$smsr': { 'cmd': '/opt/ttycommands/send_sms_twilio.py', 'stdin': False, 'args': True } ,
+         '$sms': { 'cmd': '/opt/ttycommands/send_sms_flowroute.py', 'stdin': True, 'args': '1' },
          '$ping': { 'cmd': '/bin/echo Pong.\x07', 'stdin': False } ,
          '$exec': { 'cmd': '', 'shell': True, 'stdin': False, 'args': True } ,
          '$sexec': { 'cmd': '', 'shell': True, 'stdin': False, 'args': True, 'stdin': True } ,
          '$login': { 'cmd': '/bin/true', 'stdin': False, 'args': True },
-         '$tweets': { 'cmd': '/opt/ttycommands/tweets.py', 'stdin': False, 'args': False },
+         '$tweets': { 'cmd': '/opt/ttycommands/tweets.py', 'stdin': False, 'args': '1' },
          '$tweet': { 'cmd': '/opt/ttycommands/tweet', 'stdin': True, 'args': False },
          '$status': { 'cmd': '/opt/ttycommands/status.sh', 'stdin': False, 'args': False },
          '$uptime': { 'cmd': '/usr/bin/uptime', 'stdin': False, 'args': False },
          '$wx': { 'cmd': '/opt/ttycommands/grabweather.sh', 'stdin': False, 'args': '1' },
-         '$feed': { 'cmd': '/opt/ttycommands/grabfeed.sh', 'stdin': False, 'args': False },
-         '$haight': { 'cmd': '/opt/ttycommands/haighteration.sh', 'stdin': False, 'args': False },
+         '$news': { 'cmd': '/opt/ttycommands/apinews.py', 'stdin': False, 'args': False },
+         '$redditnews': { 'cmd': '/opt/ttycommands/redditnews.py', 'stdin': False, 'args': False },
+         '$feed': { 'cmd': '/opt/ttycommands/apinews.py', 'stdin': False, 'args': False },
+         '$haight': { 'cmd': '/opt/ttycommands/haighteration.sh', 'stdin': False, 'args': '1' },
+         '$temp': { 'cmd': 'ssh -i /home/eric/.ssh/spleenkey teletype@limpoc.com ./tty/tty-localweather.pl' },
+         '$temps': { 'cmd': '/opt/ttycommands/localtemps.py' },
+         '$solar': { 'cmd': 'ssh -i /home/eric/.ssh/spleenkey teletype@limpoc.com ./tty/tty-solar.pl' },
          '$slack': { 'cmd': '/opt/ttycommands/slack.sh', 'args': '1' },
+         '$power': { 'cmd': 'ssh -i /home/eric/.ssh/spleenkey teletype@limpoc.com ./tty/tty-energy.pl' },
          '$lock': { 'cmd': '/opt/ttycommands/ttylock.sh' },
          '$unlock': { 'cmd': '/opt/ttycommands/ttyunlock.sh' },
          '$email': { 'cmd': '/opt/ttycommands/send_email.py', 'stdin': True, 'args': True },
+         '$pgpmail': { 'cmd': '/opt/ttycommands/send_pgp_email.py', 'stdin': True, 'args': True },
          '$wpress': { 'cmd': '/opt/ttycommands/wpress.py', 'stdin': True, 'args': True },
+         '$icb': { 'cmd': '/opt/ttycommands/ttyicb.sh', 'args': False },
          '$reddit': { 'cmd': '/opt/ttycommands/reddit.py', 'args': '1' },
          '$ttyon': { 'cmd': '/opt/ttycommands/tty-on', 'args': False },
          '$ttyoff': { 'cmd': '/opt/ttycommands/tty-off', 'args': False },
@@ -73,14 +78,16 @@ cmds = { '$sms': { 'cmd': '/opt/ttycommands/send_sms_twilio.py', 'stdin': False,
          '$nostream': { 'cmd': '/usr/bin/pkill -f new-telestream.py', 'stdin': False, 'args': False },
          '$tsearch': { 'cmd': '/opt/ttycommands/tsearch.py', 'stdin': False, 'args': True },
          '$fortune': { 'cmd': '/usr/games/fortune', 'args': False },
+         '$rad': { 'cmd': '/opt/ttycommands/rad.sh', 'args': False },
+         '$covid': { 'cmd': '/opt/ttycommands/covid.sh', 'args': False },
 }
 
-# WHICH TYPE OF INTERFACE
 # for usb-tty adapter in "NOTRANSLATE" mode. 
-#ser = serial.Serial('/dev/ttyACM0', 300, timeout=2, xonxoff=False, rtscts=False, dsrdtr=False)
+ser = serial.Serial('/dev/ttyACM0', 300, timeout=2, xonxoff=False, rtscts=False, dsrdtr=False)
 
 # for cp2102 dev board with optoisolators.
-ser = serial.Serial('/dev/cp2102', 1200, timeout=2, xonxoff=False, rtscts=False, dsrdtr=False, bytesize=5, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_TWO)
+# this apparently just died at some point, doesn't work anymore.
+#ser = serial.Serial('/dev/cp2102', 1200, timeout=2, xonxoff=False, rtscts=False, dsrdtr=False, bytesize=5, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_TWO)
 
 ser.flushInput()
 starttime = time.time()
@@ -348,7 +355,8 @@ def linewrap(blob, width = 72):
 def power_on():
     global powerstate
     print "===> Powering on at", time.ctime()
-    on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'on']
+    # on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'on']
+    on_cmd = ['/opt/ttycommands/tty-on']
     try:
         p = subprocess.Popen(on_cmd)
         powerstate = True
@@ -359,7 +367,8 @@ def power_on():
 def power_off():
     global powerstate 
     print "===> Powering off at", time.ctime()
-    on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'off']
+    # on_cmd = ['/usr/bin/br', '-x', '/dev/x10transmitter', 'O1', 'off']
+    on_cmd = ['/opt/ttycommands/tty-off']
     try:
         p = subprocess.Popen(on_cmd)
         powerstate = False
